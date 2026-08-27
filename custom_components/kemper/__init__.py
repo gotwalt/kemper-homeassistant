@@ -12,10 +12,12 @@ which change too) before anything is dialed. Discovery finding nothing — the
 port held by Rig Manager, a quiet network, a device on another subnet — is not
 an error; the stored address is used as it stands.
 
-**Losing the stream** therefore goes back through the same door instead of
-through libkp's own redial: reconnecting to a remembered address would keep
-dialing an address the device may have left. The coordinator asks for a reload,
-setup rediscovers, and a device that is simply switched off fails with
+**Losing the stream** does not come back through this door. Reloading the
+entry would rebuild every entity from an empty tree and fill the logbook with
+readings that never changed, so the coordinator rebuilds the session in place
+instead, with discovery in its own retry loop once the address is worth
+doubting (``coordinator``). Setup is therefore the *first* connection only: a
+device that is switched off when Home Assistant starts fails with
 :class:`ConfigEntryNotReady`, which is Home Assistant's own spaced retry.
 """
 
@@ -24,75 +26,25 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, Platform
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from libkp import ConnectOptions, ControlPolicy, DeviceModel, LibKPError
-from libkp.protocol import PORT
+from libkp import LibKPError
 
-from .const import CONF_SERIAL, CONF_SW_VERSION
 from .coordinator import KemperConfigEntry, KemperCoordinator
-from .discovery import async_find_serial
+from .session import async_open
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
-#: How the integration connects. The CBOR control channel is deliberately off:
-#: the only thing it adds over the stream is the morph position, which nothing
-#: here surfaces, and it would cost the device a second socket for as long as
-#: Home Assistant runs. No reconnect policy either — see the module docstring:
-#: coming back is a reload, so that the address is looked up again first.
-CONNECT_CONTROL = ControlPolicy.OFF
-
-
-async def async_locate(hass: HomeAssistant, entry: KemperConfigEntry) -> str:
-    """The address to dial, after asking the network where the serial is.
-
-    Returns the stored host unchanged when the entry predates serial-keying,
-    when nothing answers, or when the device is where it was; otherwise the
-    entry is updated in place — the address, and the name and version, which a
-    firmware update or a rename changes just as quietly.
-    """
-    host: str = entry.data[CONF_HOST]
-    serial: str | None = entry.data.get(CONF_SERIAL)
-    if not serial:
-        return host
-
-    found = await async_find_serial(serial)
-    if found is None:
-        return host
-
-    updates = {
-        key: value
-        for key, value in (
-            (CONF_HOST, found.host),
-            (CONF_NAME, found.name),
-            (CONF_SW_VERSION, found.version),
-        )
-        if entry.data.get(key) != value
-    }
-    if not updates:
-        return host
-    if CONF_HOST in updates:
-        _LOGGER.info(
-            "Profiler %s answered from %s instead of %s; following it",
-            serial,
-            found.host,
-            host,
-        )
-    hass.config_entries.async_update_entry(entry, data={**entry.data, **updates})
-    return found.host
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: KemperConfigEntry) -> bool:
     """Find the Profiler, connect to it, and bring its entities up."""
-    host = await async_locate(hass, entry)
-    options = ConnectOptions(port=entry.data.get(CONF_PORT, PORT), control=CONNECT_CONTROL)
     try:
-        model = await DeviceModel.connect(host, options=options)
+        model = await async_open(hass, entry)
     except (LibKPError, OSError) as err:
-        raise ConfigEntryNotReady(f"could not connect to the Profiler at {host}: {err}") from err
+        raise ConfigEntryNotReady(f"could not connect to the Profiler: {err}") from err
 
     coordinator = KemperCoordinator(hass, entry, model)
     entry.runtime_data = coordinator

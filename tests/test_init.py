@@ -27,7 +27,10 @@ from custom_components.kemper.const import (
     CONF_SW_VERSION,
     DOMAIN,
 )
-from custom_components.kemper.coordinator import RELOAD_DELAY_SECONDS
+from custom_components.kemper.coordinator import (
+    RECONNECT_DELAYS,
+    STALE_GRACE_SECONDS,
+)
 from custom_components.kemper.discovery import Found
 
 
@@ -152,38 +155,97 @@ async def test_setup_uses_the_stored_host_when_nothing_answers(
     assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 1
 
 
-async def test_a_lost_stream_reloads_the_entry(
+async def test_a_lost_stream_is_rebuilt_in_place(
     hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
 ) -> None:
-    """Coming back goes through setup, so it starts by finding the device again."""
+    """The session comes back underneath the entities, not through a reload."""
     coordinator = entry.runtime_data
     await device.hangup()
-    await wait_until(lambda: coordinator.reload_pending)
+    await wait_until(lambda: coordinator.reconnecting)
 
-    # The session was seconds old, so the reload waits rather than spinning.
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RELOAD_DELAY_SECONDS + 1))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[0] + 1))
     await hass.async_block_till_done()
-    await wait_until(lambda: entry.state is ConfigEntryState.LOADED)
+    await wait_until(lambda: not coordinator.reconnecting)
 
-    assert entry.runtime_data is not coordinator
+    # Same entry, same coordinator, same detector: only the socket is new.
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is coordinator
     assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 2
+
+
+async def test_the_readings_survive_the_gap(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """What the entities showed before the drop is what they show during it.
+
+    This is the whole point of rebuilding in place: a blink must not reach the
+    logbook as a rig that went unavailable, went unknown, and came back.
+    """
+    rig = entity_id(hass, "sensor", "rig_name")
+    before = hass.states.get(rig).state
+
+    coordinator = entry.runtime_data
+    await device.hangup()
+    await wait_until(lambda: coordinator.reconnecting)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(rig).state == before
+
+
+async def test_a_gap_that_outlives_the_grace_goes_unavailable(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """Stale readings are worth showing for a while, not forever."""
+    coordinator = entry.runtime_data
+    device.pause_accepting()
+    await device.hangup()
+    await wait_until(lambda: coordinator.reconnecting)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=STALE_GRACE_SECONDS + 1))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(entity_id(hass, "sensor", "rig_name")).state == "unavailable"
+    assert entry.state is ConfigEntryState.LOADED  # still loaded, still trying
+
+
+async def test_a_device_that_stays_away_keeps_being_dialed(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """A Profiler switched off overnight is found again without anyone helping."""
+    coordinator = entry.runtime_data
+    device.pause_accepting()
+    await device.hangup()
+    await wait_until(lambda: coordinator.reconnecting)
+
+    for delay in RECONNECT_DELAYS[:3]:
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=delay + 1))
+        await hass.async_block_till_done()
+    assert coordinator.reconnecting
+
+    device.resume_accepting()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[-1] + 1))
+    await hass.async_block_till_done()
+    await wait_until(lambda: not coordinator.reconnecting)
+
     assert hass.states.get(entity_id(hass, "sensor", "rig_name")).state != "unavailable"
 
 
-async def test_unloading_a_lost_entry_cancels_the_reload(
+async def test_unloading_during_a_gap_stops_the_dialing(
     hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
 ) -> None:
     """Nothing dials after the entry is gone, and nothing is left armed."""
     coordinator = entry.runtime_data
+    device.pause_accepting()
     await device.hangup()
-    await wait_until(lambda: coordinator.reload_pending)
+    await wait_until(lambda: coordinator.reconnecting)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert not coordinator.reload_pending
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RELOAD_DELAY_SECONDS + 1))
+    device.resume_accepting()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[-1] + 1))
     await hass.async_block_till_done()
+
     assert entry.state is ConfigEntryState.NOT_LOADED
     assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 1
 

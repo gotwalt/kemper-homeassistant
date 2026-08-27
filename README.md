@@ -68,13 +68,31 @@ device.
 
 ### Losing the connection
 
-When the stream ends — the amp switched off, the network dropped — the
-integration does not redial the address it was using, because that address is
-the part that can change. It reloads the config entry instead, which starts
-again at discovery: find the serial, follow it to wherever it is now, connect
-once. A Profiler that is simply off fails that setup and Home Assistant retries
-on its own widening schedule; a session that ends within a minute of opening
-waits half a minute before reloading, so nothing can spin.
+A Profiler drops a session now and then — the amp switched off, a network
+blink, a quiet spell. The integration rebuilds the session **underneath the
+entities**: same config entry, same device, same detector, same values on
+screen. Nothing is reloaded, so a blink does not reach the logbook as five
+entities going unavailable, going unknown, and coming back with the readings
+they already had.
+
+Rebuilding paces itself — 2s, 5s, 15s, 30s, then every minute for as long as
+it takes, so a Profiler switched off overnight is picked up in the morning
+without anyone touching Home Assistant. The first two attempts dial the address
+as it stands, since a device that hiccuped is nearly always still there; from
+the third, discovery joins in, because one that has been gone that long may
+have come back on another DHCP lease — and the entry follows it there.
+
+Two things keep the entity layer quiet across all of it:
+
+- **the readings hold for 30 seconds** after a drop, so an ordinary blip is
+  invisible to the dashboard; past that they go unavailable, because stale is
+  worth showing for a while and not forever; and
+- **a new session's snapshots are held back until it names a rig**, so the
+  half-second before the device's opening burst lands cannot blank a sensor.
+
+Only the *first* connection is a setup: a Profiler that is off when Home
+Assistant starts fails with `ConfigEntryNotReady`, which is Home Assistant's
+own widening retry.
 
 ## Install
 
