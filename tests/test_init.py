@@ -182,6 +182,9 @@ async def test_the_readings_survive_the_gap(
     logbook as a rig that went unavailable, went unknown, and came back.
     """
     rig = entity_id(hass, "sensor", "rig_name")
+    # Wait for the opening burst: a reading can only survive a gap once it
+    # exists, and comparing "unknown" to itself would prove nothing.
+    await wait_until(lambda: hass.states.get(rig).state not in ("unknown", "unavailable"))
     before = hass.states.get(rig).state
 
     coordinator = entry.runtime_data
