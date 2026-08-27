@@ -3,14 +3,8 @@
 from __future__ import annotations
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from libkp.state import Connection
 
 from .coordinator import KemperCoordinator
-
-#: The connection states in which what the entities show is live. A degraded
-#: connection is still a connection: the stream — everything these entities
-#: read — is open, and only the optional control channel is missing.
-LIVE = (Connection.CONNECTED, Connection.DEGRADED)
 
 
 class KemperEntity(CoordinatorEntity[KemperCoordinator]):
@@ -25,6 +19,13 @@ class KemperEntity(CoordinatorEntity[KemperCoordinator]):
 
     @property
     def available(self) -> bool:
-        """Available while the stream is up — the tree goes stale without it."""
-        state = self.coordinator.data
-        return super().available and state is not None and state.connection in LIVE
+        """Available while the readings are live.
+
+        Which is not the same as while the socket is up: a dropped session is
+        rebuilt underneath these entities, and for the length of that grace
+        what they hold is a few seconds old rather than wrong. Going
+        unavailable for every blink would say the opposite, loudly, in the
+        logbook.
+        """
+        coordinator = self.coordinator
+        return super().available and coordinator.data is not None and coordinator.readings_live

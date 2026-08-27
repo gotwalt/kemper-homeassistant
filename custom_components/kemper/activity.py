@@ -126,6 +126,22 @@ class ActivityDetector:
         self._attached = True
 
     @callback
+    def rebind(self, model: DeviceModel) -> None:
+        """Follow a rebuilt session's model, keeping what has been heard.
+
+        The quiet window is deliberately left running: silence during a
+        reconnect is silence, and a player who stopped before the drop should
+        not have the clock restarted by it.
+        """
+        if self._attached:
+            self._model.remove_event_listener(self._on_event)
+            self._attached = False
+            self._model = model
+            self.start()
+        else:
+            self._model = model
+
+    @callback
     def stop(self) -> None:
         """Stop watching and disarm the timer. Idempotent."""
         if self._attached:
