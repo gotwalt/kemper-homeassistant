@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/gotwalt/kemper-homeassistant/main/custom_components/kemper/brand/logo.png" alt="Kemper" align="right" width="96">
+![Kemper](https://raw.githubusercontent.com/gotwalt/kemper-homeassistant/main/assets/logo.png)
 
 # Kemper Profiler — Home Assistant integration
 
