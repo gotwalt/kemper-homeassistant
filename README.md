@@ -8,9 +8,9 @@
 A custom integration that puts a Kemper Profiler on the local network into
 Home Assistant: what rig is loaded, and whether anyone is playing through it.
 
-It holds one MIDI3 session for as long as Home Assistant runs, takes
-everything it shows from what the device pushes unrequested, and never polls
-the device or reconnects in a loop. The protocol underneath is
+It holds a MIDI3 session for as long as Home Assistant runs, takes everything
+it shows from what the device pushes unrequested, and never polls the device or
+reconnects in a loop. The protocol underneath is
 [libkp](https://github.com/gotwalt/libkp), which Home Assistant installs from
 PyPI when it first loads the integration.
 
@@ -65,6 +65,20 @@ Two options (Settings → Devices & services → Kemper Profiler → Configure):
 
 Saving them retunes the running detector; it does **not** reconnect to the
 device.
+
+### Fresh sessions, every ten minutes
+
+A Profiler that is asked to hold *one* connection for hours has been seen to
+stop serving and flash its LEDs red, needing a reboot to come back. So the
+session is not held indefinitely: libkp closes it every ten minutes and opens
+another one immediately, which costs the device one handshake and takes about
+a second.
+
+None of that reaches the entities. The state tree, the values on screen, the
+activity detector and its history all survive the swap; nothing goes
+unavailable, and nothing is written to the logbook. If a swap cannot reopen —
+the device is off, or the address moved — it becomes an ordinary lost
+connection, handled exactly as below.
 
 ### Losing the connection
 

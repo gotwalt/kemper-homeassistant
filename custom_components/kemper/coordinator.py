@@ -15,6 +15,13 @@ that never actually changed — and a Profiler drops a session often enough
 session is rebuilt underneath the entities instead: same coordinator, same
 detector, same values on screen, one line in the log.
 
+A session ending is rarer than it looks, and never routine: libkp's own
+ten-minute session recycle (``session.CONNECT_RECYCLE``) is invisible here,
+because it keeps the model, the tree and the snapshot queue and only reports
+:attr:`~libkp.state.Connection.RECONNECTING` for the second it takes. What
+reaches this class is a session that is *gone* — the device dropped it, or a
+recycle could not reopen.
+
 Rebuilding paces itself with :data:`RECONNECT_DELAYS` and keeps going for as
 long as the entry is loaded — a Profiler that is switched off overnight is
 found again in the morning without anyone touching Home Assistant. The first

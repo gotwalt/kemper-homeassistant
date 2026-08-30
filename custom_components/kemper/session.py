@@ -11,7 +11,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import HomeAssistant
-from libkp import ConnectOptions, ControlPolicy, DeviceModel
+from libkp import ConnectOptions, ControlPolicy, DeviceModel, RecyclePolicy
 from libkp.protocol import PORT
 
 from .const import CONF_SERIAL, CONF_SW_VERSION
@@ -25,6 +25,17 @@ _LOGGER = logging.getLogger(__name__)
 #: Home Assistant runs. libkp's own reconnect is off too — it would redial the
 #: address it was given, and the coordinator wants discovery in that loop.
 CONNECT_CONTROL = ControlPolicy.OFF
+
+#: How long one session lives. This is libkp's default, named here because it
+#: is the whole reason a Home Assistant session is safe to leave running: a
+#: Profiler asked to hold one connection for hours has been seen to stop
+#: serving and flash its LEDs red, so libkp retires the session every ten
+#: minutes and opens another in its place. Entities never see it — the tree
+#: and the readings survive the swap, and the second or so it takes falls well
+#: inside the coordinator's stale grace. If a swap cannot reopen, libkp reports
+#: ``Disconnected`` and the coordinator's own loop, discovery and all, takes
+#: over from there.
+CONNECT_RECYCLE = RecyclePolicy()
 
 
 async def async_locate(hass: HomeAssistant, entry: ConfigEntry) -> str:
@@ -80,5 +91,9 @@ async def async_open(
     the caller to turn into a retry or a failed setup.
     """
     host = await async_locate(hass, entry) if locate else entry.data[CONF_HOST]
-    options = ConnectOptions(port=entry.data.get(CONF_PORT, PORT), control=CONNECT_CONTROL)
+    options = ConnectOptions(
+        port=entry.data.get(CONF_PORT, PORT),
+        control=CONNECT_CONTROL,
+        recycle=CONNECT_RECYCLE,
+    )
     return await DeviceModel.connect(host, options=options)
