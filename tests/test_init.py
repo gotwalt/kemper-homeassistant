@@ -13,7 +13,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from libkp.session import PROTOCOL_CBOR_CONTROL, PROTOCOL_MIDI3_STREAM
+from libkp import RecyclePolicy
+from libkp.model import SESSION_MAX_AGE
+from libkp.session import CONNECTION_COOLDOWN, PROTOCOL_CBOR_CONTROL, PROTOCOL_MIDI3_STREAM
 from libkp.testing import FakeDevice
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -32,6 +34,7 @@ from custom_components.kemper.coordinator import (
     STALE_GRACE_SECONDS,
 )
 from custom_components.kemper.discovery import Found
+from custom_components.kemper.session import CONNECT_RECYCLE
 
 
 async def test_setup_opens_exactly_one_session(
@@ -193,6 +196,52 @@ async def test_the_readings_survive_the_gap(
     await hass.async_block_till_done()
 
     assert hass.states.get(rig).state == before
+
+
+async def test_the_session_is_retired_on_libkps_clock(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> None:
+    """Ten minutes, libkp's default: a Profiler is never asked to hold one
+    session for hours, which is what makes leaving this running safe."""
+    assert CONNECT_RECYCLE is not None
+    assert CONNECT_RECYCLE.max_age == SESSION_MAX_AGE
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_a_recycled_session_never_reaches_the_entities(
+    hass: HomeAssistant, device: FakeDevice
+) -> None:
+    """libkp swapping its own session is invisible up here: same coordinator,
+    same model handle, same readings, and no reconnect of ours at all."""
+    entry = make_entry(device)
+    entry.add_to_hass(hass)
+    # The shortest swap libkp honours, so the clock fires inside a test.
+    with patch(
+        "custom_components.kemper.session.CONNECT_RECYCLE",
+        RecyclePolicy(max_age=CONNECTION_COOLDOWN),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        try:
+            coordinator = entry.runtime_data
+            model = coordinator.model
+            rig = entity_id(hass, "sensor", "rig_name")
+            await wait_until(lambda: hass.states.get(rig).state not in ("unknown", "unavailable"))
+            before = hass.states.get(rig).state
+
+            # The device serves a second session without anyone here asking.
+            await wait_until(
+                lambda: device.connection_count(PROTOCOL_MIDI3_STREAM) == 2, timeout=8.0
+            )
+            await hass.async_block_till_done()
+
+            assert coordinator.model is model, "the handle survives the swap"
+            assert not coordinator.reconnecting, "the coordinator never noticed"
+            assert coordinator.readings_live
+            assert hass.states.get(rig).state == before
+        finally:
+            assert await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
 
 
 async def test_a_gap_that_outlives_the_grace_goes_unavailable(
