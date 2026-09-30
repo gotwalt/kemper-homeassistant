@@ -26,15 +26,11 @@ _LOGGER = logging.getLogger(__name__)
 #: address it was given, and the coordinator wants discovery in that loop.
 CONNECT_CONTROL = ControlPolicy.OFF
 
-#: How long one session lives. This is libkp's default, named here because it
-#: is the whole reason a Home Assistant session is safe to leave running: a
-#: Profiler asked to hold one connection for hours has been seen to stop
-#: serving and flash its LEDs red, so libkp retires the session every ten
-#: minutes and opens another in its place. Entities never see it — the tree
-#: and the readings survive the swap, and the second or so it takes falls well
-#: inside the coordinator's stale grace. If a swap cannot reopen, libkp reports
-#: ``Disconnected`` and the coordinator's own loop, discovery and all, takes
-#: over from there.
+#: How long one session lives: libkp's default, ten minutes. It matters only for
+#: a session held while someone plays, since a quiet poll hangs up after a few
+#: seconds (``coordinator``). The swap is invisible to the entities: the tree
+#: and the readings survive it. If a swap cannot reopen, libkp reports
+#: ``Disconnected`` and the coordinator's own loop takes over.
 CONNECT_RECYCLE = RecyclePolicy()
 
 

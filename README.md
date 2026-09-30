@@ -8,9 +8,9 @@
 A custom integration that puts a Kemper Profiler on the local network into
 Home Assistant: what rig is loaded, and whether anyone is playing through it.
 
-It holds a MIDI3 session for as long as Home Assistant runs, takes everything
-it shows from what the device pushes unrequested, and never polls the device or
-reconnects in a loop. The protocol underneath is
+It checks in on the device every 30 seconds, stays connected for as long as
+someone is playing, and hangs up again once they stop. Everything it shows
+comes from what the device pushes unrequested. The protocol underneath is
 [libkp](https://github.com/gotwalt/libkp), which Home Assistant installs from
 PyPI when it first loads the integration.
 
@@ -66,24 +66,34 @@ Two options (Settings → Devices & services → Kemper Profiler → Configure):
 Saving them retunes the running detector; it does **not** reconnect to the
 device.
 
-### Fresh sessions, every ten minutes
+### Connected only while it is being played
 
-A Profiler that is asked to hold *one* connection for hours has been seen to
-stop serving and flash its LEDs red, needing a reboot to come back. So the
-session is not held indefinitely: libkp closes it every ten minutes and opens
-another one immediately, which costs the device one handshake and takes about
-a second.
+A Profiler that Home Assistant kept streaming has been seen to wedge after
+about a day: six red LEDs blinking, the front panel dead, the device off the
+network until it is power-cycled. Closing and reopening the session every ten
+minutes did not change that, so the integration no longer streams a device
+nobody is playing:
 
-None of that reaches the entities. The state tree, the values on screen, the
-activity detector and its history all survive the swap; nothing goes
-unavailable, and nothing is written to the logbook. If a swap cannot reopen —
-the device is off, or the address moved — it becomes an ordinary lost
-connection, handled exactly as below.
+- **every 30 seconds it opens a session and listens for 3.** That is enough
+  for the device to name the loaded rig and to send a few dozen meter frames.
+- **If nothing is sounding, it hangs up.** The readings stand, nothing goes
+  unavailable, and nothing is logged.
+- **If someone is playing, it stays connected** and *Active* turns on. The
+  session is held until the quiet window passes with nothing heard. *Active*
+  then turns off, the session closes, and the 30-second polling resumes.
+
+The cost is latency at the start of a session: *Active* turns on at the next
+poll, up to about half a minute after the first note, and *Last activity*
+records that moment. Rig changes made while nobody is playing show up at the
+next poll too.
+
+A held session is still retired and reopened by libkp every ten minutes. The
+entities never see that swap.
 
 ### Losing the connection
 
-A Profiler drops a session now and then — the amp switched off, a network
-blink, a quiet spell. The integration rebuilds the session **underneath the
+A Profiler drops a session now and then, or fails to answer a poll: the amp
+switched off, or a network blink. The integration rebuilds the session **underneath the
 entities**: same config entry, same device, same detector, same values on
 screen. Nothing is reloaded, so a blink does not reach the logbook as five
 entities going unavailable, going unknown, and coming back with the readings
@@ -98,7 +108,8 @@ have come back on another DHCP lease — and the entry follows it there.
 
 Two things keep the entity layer quiet across all of it:
 
-- **the readings hold for 30 seconds** after a drop, so an ordinary blip is
+- **the readings hold between polls, and for 30 seconds** after a drop or a
+  failed poll, so an ordinary blip is
   invisible to the dashboard; past that they go unavailable, because stale is
   worth showing for a while and not forever; and
 - **a new session's snapshots are held back until it names a rig**, so the
