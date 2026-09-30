@@ -18,9 +18,10 @@ an error; the stored address is used as it stands.
 entry would rebuild every entity from an empty tree and fill the logbook with
 readings that never changed, so the coordinator rebuilds the session in place
 instead, with discovery in its own retry loop once the address is worth
-doubting (``coordinator``). Setup is therefore the *first* connection only: a
-device that is switched off when Home Assistant starts fails with
-:class:`ConfigEntryNotReady`, which is Home Assistant's own spaced retry.
+doubting (``coordinator``). A device that is away when the entry is set up is
+handled by the same loop: the entry loads anyway, its entities unavailable,
+and the coordinator keeps dialing -- not :class:`ConfigEntryNotReady`, whose
+retry backs off to ten minutes.
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 from libkp import LibKPError
 
 from .coordinator import KemperConfigEntry, KemperCoordinator
@@ -46,7 +46,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: KemperConfigEntry) -> bo
     try:
         model = await async_open(hass, entry)
     except (LibKPError, OSError) as err:
-        raise ConfigEntryNotReady(f"could not connect to the Profiler: {err}") from err
+        # Not ConfigEntryNotReady: Home Assistant's setup retry backs off to
+        # ten minutes, and a device that comes back between two of those
+        # would sit unused for most of it. The coordinator dials on its own
+        # pace instead -- never more than a minute apart -- with the entities
+        # unavailable until it answers.
+        _LOGGER.info("Could not reach the Profiler at setup (%s); will keep dialing", err)
+        model = None
 
     coordinator = KemperCoordinator(hass, entry, model)
     entry.runtime_data = coordinator

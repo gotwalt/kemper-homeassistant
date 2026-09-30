@@ -129,7 +129,9 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
 
     config_entry: KemperConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: KemperConfigEntry, model: DeviceModel) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: KemperConfigEntry, model: DeviceModel | None
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -137,6 +139,9 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
             name=f"{DOMAIN} {entry.data[CONF_HOST]}",
             update_interval=None,
         )
+        #: The current session's model, or the last one's once it has closed.
+        #: ``None`` only until the device first answers, when the entry was
+        #: loaded while it was away.
         self.model = model
         self.activity = ActivityDetector(
             hass,
@@ -146,10 +151,10 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
         )
         self._task: asyncio.Task[None] | None = None
         #: Whether a session is open right now.
-        self._connected = True
+        self._connected = model is not None
         #: Whether the device answered the last time it was dialed. False from
         #: a drop or a failed poll until the next session opens.
-        self._reachable = True
+        self._reachable = model is not None
         #: Whether the open session is being closed by choice -- a quiet poll,
         #: or the detector settling off -- rather than dropped by the device.
         self._releasing = False
@@ -223,12 +228,15 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
         """Seed the first snapshot, attach the detector, start listening.
 
         The session setup opened is treated as the first poll: it is sampled,
-        and held only if someone is playing.
+        and held only if someone is playing. If setup could not open one, the
+        entities start unavailable and the run loop keeps dialing, on its own
+        pace rather than Home Assistant's much slower setup retry.
         """
         self._remove_activity_listener = self.activity.add_listener(self._activity_changed)
-        self._open_session()
-        self.async_set_updated_data(self.model.state())
-        self._synced = True  # setup connected; its burst is what seeded the data
+        if self.model is not None:
+            self._open_session()
+            self.async_set_updated_data(self.model.state())
+            self._synced = True  # setup connected; its burst is what seeded the data
         self.activity.start()
         self._task = self.config_entry.async_create_background_task(
             self.hass, self._run(), name=f"{DOMAIN} {self.device_id} session"
@@ -237,11 +245,13 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
     async def _run(self) -> None:
         """Poll the device, and hold a session while it is being played."""
         while not self._closing:
-            await self._pump()
-            if self._closing:
-                return
-            released = self._end_session()
-            await self._redial(lost=not released)
+            lost = True
+            if self._connected:
+                await self._pump()
+                if self._closing:
+                    return
+                lost = not self._end_session()
+            await self._redial(lost=lost)
 
     async def _pump(self) -> None:
         """Drain the model's store until the stream ends.
@@ -267,8 +277,9 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
         is :data:`RECONNECT_DELAYS`'s first, because a device that was being
         played a moment ago is probably still being played.
         """
-        with contextlib.suppress(LibKPError, OSError):
-            await self.model.close()
+        if self.model is not None:
+            with contextlib.suppress(LibKPError, OSError):
+                await self.model.close()
 
         failures = 0
         while not self._closing:
@@ -439,7 +450,8 @@ class KemperCoordinator(DataUpdateCoordinator[DeviceState]):
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
-        await self.model.close()
+        if self.model is not None:
+            await self.model.close()
 
     def apply_options(self) -> None:
         """Re-read the options the detector uses, without touching the socket."""

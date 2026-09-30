@@ -57,7 +57,7 @@ class ActivityDetector:
     def __init__(
         self,
         hass: HomeAssistant,
-        model: DeviceModel,
+        model: DeviceModel | None,
         *,
         window: float,
         threshold: float,
@@ -75,6 +75,9 @@ class ActivityDetector:
         self._cancel_timer: CALLBACK_TYPE | None = None
         self._listeners: list[Callable[[], None]] = []
         self._attached = False
+        #: Whether :meth:`start` has been called. With no model yet, it takes
+        #: effect at the first :meth:`rebind`.
+        self._started = False
 
     # -- what the entities read ------------------------------------------
 
@@ -119,11 +122,10 @@ class ActivityDetector:
 
     @callback
     def start(self) -> None:
-        """Begin watching the model's events."""
-        if self._attached:
-            return
-        self._model.add_event_listener(self._on_event)
-        self._attached = True
+        """Begin watching the model's events, or the first model's, if the
+        entry loaded before the device answered."""
+        self._started = True
+        self._attach()
 
     @callback
     def rebind(self, model: DeviceModel) -> None:
@@ -133,21 +135,29 @@ class ActivityDetector:
         reconnect is silence, and a player who stopped before the drop should
         not have the clock restarted by it.
         """
-        if self._attached:
-            self._model.remove_event_listener(self._on_event)
-            self._attached = False
-            self._model = model
-            self.start()
-        else:
-            self._model = model
+        self._detach()
+        self._model = model
+        self._attach()
 
     @callback
     def stop(self) -> None:
         """Stop watching and disarm the timer. Idempotent."""
-        if self._attached:
-            self._model.remove_event_listener(self._on_event)
-            self._attached = False
+        self._started = False
+        self._detach()
         self._disarm()
+
+    @callback
+    def _attach(self) -> None:
+        if self._attached or not self._started or self._model is None:
+            return
+        self._model.add_event_listener(self._on_event)
+        self._attached = True
+
+    @callback
+    def _detach(self) -> None:
+        if self._attached and self._model is not None:
+            self._model.remove_event_listener(self._on_event)
+        self._attached = False
 
     @callback
     def update_options(self, *, window: float, threshold: float) -> None:

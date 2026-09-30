@@ -56,5 +56,5 @@ async def async_get_config_entry_diagnostics(
             "active": detector.active,
             "last_activity": None if last_activity is None else last_activity.isoformat(),
         },
-        "state": plain(coordinator.model.state()),
+        "state": None if coordinator.model is None else plain(coordinator.model.state()),
     }
