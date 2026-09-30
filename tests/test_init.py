@@ -71,16 +71,52 @@ async def test_unload_hangs_up(
         await connection.closed.wait()
 
 
-async def test_a_device_that_is_not_there_retries_later(
+async def test_a_device_that_is_not_there_still_loads(
     hass: HomeAssistant, device: FakeDevice
 ) -> None:
-    """A refused connection is ``ConfigEntryNotReady``, not a hard failure."""
+    """A device away at setup loads the entry unavailable, and the coordinator
+    finds it on its own pace -- not Home Assistant's ten-minute setup retry."""
     entry = make_entry(device)
-    await device.stop()  # nothing is listening on that port any more
+    device.pause_accepting()
     entry.add_to_hass(hass)
-    assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.state is ConfigEntryState.SETUP_RETRY
+    try:
+        assert entry.state is ConfigEntryState.LOADED
+        coordinator = entry.runtime_data
+        rig = entity_id(hass, "sensor", "rig_name")
+        assert hass.states.get(rig).state == "unavailable"
+        assert coordinator.reconnecting
+
+        device.resume_accepting()
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[0] + 1))
+        await hass.async_block_till_done()
+        await wait_until(lambda: coordinator.connected)
+        await wait_until(lambda: hass.states.get(rig).state not in ("unknown", "unavailable"))
+        assert not coordinator.reconnecting
+    finally:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_unloading_an_entry_that_never_connected(
+    hass: HomeAssistant, device: FakeDevice
+) -> None:
+    """Nothing to hang up, and nothing left dialing."""
+    entry = make_entry(device)
+    device.pause_accepting()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    device.resume_accepting()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[-1] + 1))
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 0
 
 
 async def test_changing_options_does_not_reconnect(

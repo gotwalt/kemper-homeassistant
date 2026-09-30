@@ -115,9 +115,11 @@ Two things keep the entity layer quiet across all of it:
 - **a new session's snapshots are held back until it names a rig**, so the
   half-second before the device's opening burst lands cannot blank a sensor.
 
-Only the *first* connection is a setup: a Profiler that is off when Home
-Assistant starts fails with `ConfigEntryNotReady`, which is Home Assistant's
-own widening retry.
+A Profiler that is off when Home Assistant starts is handled the same way.
+The integration loads anyway, with its entities unavailable, and keeps dialing
+on the schedule above. It does not use Home Assistant's own setup retry, which
+backs off to ten minutes; that retry could leave a device that has already come
+back unused for most of that time.
 
 ## Install
 
