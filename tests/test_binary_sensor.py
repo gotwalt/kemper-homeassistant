@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from conftest import entity_id, wait_for_state
+from conftest import entity_id, wait_for_state, wait_until
 from homeassistant.const import EVENT_STATE_CHANGED, STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.util import dt as dt_util
@@ -22,6 +22,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.kemper.const import DEFAULT_ACTIVITY_WINDOW
+from custom_components.kemper.coordinator import SAMPLE_SECONDS
 
 #: Rig output level (v6) well above and well below the 2% default threshold.
 LOUD = 9000
@@ -159,3 +160,27 @@ async def test_a_louder_threshold_ignores_quiet_playing(
     await hass.async_block_till_done()
 
     assert hass.states.get(active).state == STATE_OFF
+
+
+async def test_signal_holds_the_session_until_the_window_settles(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """A poll that hears playing stays connected past its sample, and lets go
+    only when the detector settles off -- and the sensor stays available."""
+    coordinator = entry.runtime_data
+    active = entity_id(hass, "binary_sensor", "active")
+    await device.push(meter_message(LOUD))
+    await wait_for_state(hass, active, STATE_ON)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=SAMPLE_SECONDS + 1))
+    await hass.async_block_till_done()
+    assert coordinator.connected
+    assert not device.connections[0].closed.is_set()
+
+    window = timedelta(minutes=DEFAULT_ACTIVITY_WINDOW)
+    async_fire_time_changed(hass, dt_util.utcnow() + window + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    await wait_until(lambda: not coordinator.connected)
+
+    assert hass.states.get(active).state == STATE_OFF
+    assert not coordinator.reconnecting

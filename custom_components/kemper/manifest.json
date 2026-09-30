@@ -6,8 +6,8 @@
   "dependencies": [],
   "documentation": "https://github.com/gotwalt/kemper-homeassistant",
   "integration_type": "device",
-  "iot_class": "local_push",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/gotwalt/kemper-homeassistant/issues",
-  "requirements": ["libkp==0.2.0"],
-  "version": "0.3.0"
+  "requirements": ["libkp==0.3.0"],
+  "version": "0.4.0"
 }

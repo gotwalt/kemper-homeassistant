@@ -1,11 +1,10 @@
 """The Kemper Profiler integration: one config entry, one device, one session.
 
-Setting an entry up opens one MIDI3 stream to the Profiler and holds it for as
-long as the entry is loaded. The device tolerates a session; what it does not
-tolerate is connection *churn* (``docs/06``, ``docs/11``), so nothing here
-dials in a loop. It is not asked to hold *one* session indefinitely either:
-libkp retires its own session every ten minutes and opens another in its place
-(``session.CONNECT_RECYCLE``), which the entities never see.
+Setting an entry up opens one MIDI3 stream to the Profiler. From then on the
+coordinator duty-cycles it: a short session every poll interval, held only
+while someone is playing (``coordinator``). A Profiler kept streaming for a day
+has been seen to wedge, and one that nobody is playing has nothing worth
+streaming.
 
 **Where the device is** is decided fresh at every setup. The entry's identity
 is the serial the Profiler advertises, not its address: an entry that knows a

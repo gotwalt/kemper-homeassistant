@@ -30,7 +30,9 @@ from custom_components.kemper.const import (
     DOMAIN,
 )
 from custom_components.kemper.coordinator import (
+    POLL_INTERVAL_SECONDS,
     RECONNECT_DELAYS,
+    SAMPLE_SECONDS,
     STALE_GRACE_SECONDS,
 )
 from custom_components.kemper.discovery import Found
@@ -300,6 +302,82 @@ async def test_unloading_during_a_gap_stops_the_dialing(
 
     assert entry.state is ConfigEntryState.NOT_LOADED
     assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 1
+
+
+async def let_the_sample_run_out(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    """End the open session's quiet sample, and wait for the hang-up."""
+    coordinator = entry.runtime_data
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=SAMPLE_SECONDS + 0.5))
+    await hass.async_block_till_done()
+    await wait_until(lambda: not coordinator.connected)
+
+
+async def test_a_quiet_poll_hangs_up(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """Nobody playing: the device is not streamed past the sample, and that is
+    routine -- no reconnect, and the readings stand."""
+    coordinator = entry.runtime_data
+    rig = entity_id(hass, "sensor", "rig_name")
+    await wait_until(lambda: hass.states.get(rig).state not in ("unknown", "unavailable"))
+    before = hass.states.get(rig).state
+
+    await let_the_sample_run_out(hass, entry)
+    async with asyncio.timeout(5):
+        await device.connections[0].closed.wait()
+
+    assert not coordinator.reconnecting
+    assert coordinator.readings_live
+    assert hass.states.get(rig).state == before
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_the_next_poll_dials_again(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """A poll interval after a quiet hang-up, the device is asked again."""
+    coordinator = entry.runtime_data
+    await let_the_sample_run_out(hass, entry)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=POLL_INTERVAL_SECONDS + 1))
+    await hass.async_block_till_done()
+    await wait_until(lambda: coordinator.connected)
+
+    assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 2
+    assert entry.runtime_data is coordinator
+
+
+async def test_nothing_dials_between_polls(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """The quiet gap is a poll interval, not the drop schedule's first delay."""
+    await let_the_sample_run_out(hass, entry)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=RECONNECT_DELAYS[1] + 1))
+    await hass.async_block_till_done()
+
+    assert device.connection_count(PROTOCOL_MIDI3_STREAM) == 1
+
+
+async def test_a_poll_that_cannot_connect_goes_unavailable_after_the_grace(
+    hass: HomeAssistant, device: FakeDevice, entry: MockConfigEntry
+) -> None:
+    """A device switched off between polls is found missing at the next one,
+    and its readings last the grace from then, as after a drop."""
+    coordinator = entry.runtime_data
+    await let_the_sample_run_out(hass, entry)
+    device.pause_accepting()
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=POLL_INTERVAL_SECONDS + 1))
+    await hass.async_block_till_done()
+    await wait_until(lambda: coordinator.reconnecting)
+    assert hass.states.get(entity_id(hass, "sensor", "rig_name")).state != "unavailable"
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=STALE_GRACE_SECONDS + 1))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(entity_id(hass, "sensor", "rig_name")).state == "unavailable"
+    assert entry.state is ConfigEntryState.LOADED
 
 
 async def test_every_entity_is_keyed_by_the_serial(
