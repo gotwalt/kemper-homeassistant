@@ -1255,18 +1255,18 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "libkp", specifier = "==0.2.0" },
+    { name = "libkp", specifier = "==0.3.0" },
     { name = "pytest-homeassistant-custom-component", specifier = "==0.13.357" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]
 name = "libkp"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5a/1a/2da8d9085a463dea60df0e1014949d0256e872f6c1c294a57f4a99fb4925/libkp-0.2.0.tar.gz", hash = "sha256:49862152d6dc238c41725a704228009116294a0be5dd20b29d38f3149a0a2dab", size = 154790, upload-time = "2026-08-30T20:19:07.238Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/3c/7aede7e5675e95f65232e5ad220e175e403b8ec2a2d124db52eadd7b72ec/libkp-0.3.0.tar.gz", hash = "sha256:5836e8886989d3c65510f4f6d5a9a540efd9f16d9f98e637083817cba266d45f", size = 157440, upload-time = "2026-09-30T18:10:59.827Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/af/1eb75c10e120b9ebc289d4f061dfee2a0d5b6f01eb1d62a0f66539cf72c1/libkp-0.2.0-py3-none-any.whl", hash = "sha256:9cc0d6539a2cc94fc5a2d3659bd7e213ac18e206eb1b1dedf3b03c82a71d1cbc", size = 112194, upload-time = "2026-08-30T20:19:05.516Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/5b/a182455822ef4a6bf37f0a7c438a44c913525fccfc8513be46821687fa45/libkp-0.3.0-py3-none-any.whl", hash = "sha256:f1bcbb60e722721a730b1e201daf0d0ffce26f5287edf5dd793e28cb7f224ad9", size = 113064, upload-time = "2026-09-30T18:10:58.335Z" },
 ]
 
 [[package]]
